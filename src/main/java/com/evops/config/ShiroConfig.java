@@ -366,6 +366,25 @@ public class ShiroConfig {
         chain.addPathDefinition("/api/cold-chain/scores/**",
                 "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_SCORE_VIEW + "]");
 
+        // —— V16 冷链运输监管报表版本化（写/导出路径在前，宽泛只读在后）——
+        // 统计口径版本维护（起草/发布新版本；只影响此后生成的报表）
+        chain.addPathDefinition("/api/cold-chain/reg-reports/calibers/draft",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REG_CALIBER_MANAGE + "]");
+        chain.addPathDefinition("/api/cold-chain/reg-reports/calibers/*/publish",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REG_CALIBER_MANAGE + "]");
+        // 手动生成/重算月度报表（重算只出新版本，不覆盖已下载文件）
+        chain.addPathDefinition("/api/cold-chain/reg-reports/generate",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REG_REPORT_GENERATE + "]");
+        // 报表列表（GET 集合路径，与详情/导出同读快照）
+        chain.addPathDefinition("/api/cold-chain/reg-reports",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REG_REPORT_VIEW + "]");
+        // 报表导出（逐次留痕，不覆盖已下载文件）
+        chain.addPathDefinition("/api/cold-chain/reg-reports/*/export",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REG_REPORT_EXPORT + "]");
+        // 口径版本列表/报表列表/详情/错误链只读
+        chain.addPathDefinition("/api/cold-chain/reg-reports/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REG_REPORT_VIEW + "]");
+
         // 冷链台账接口与管理页面使用 HTTP Basic，便于 curl/联调；浏览器会弹出登录框
         chain.addPathDefinition("/api/**", "authcBasic");
         chain.addPathDefinition("/ui/**", "authcBasic");

@@ -79,7 +79,9 @@ public class ColdChainRealm extends AuthorizingRealm {
                 // V15：调度查看承运商评分台账、确认改进任务完成、重试逾期提醒
                 CcConstants.PERM_SCORE_VIEW,
                 CcConstants.PERM_SCORE_TASK_HANDLE,
-                CcConstants.PERM_SCORE_TASK_REMIND)));
+                CcConstants.PERM_SCORE_TASK_REMIND,
+                // V16：调度可查看冷链运输监管报表台账（口径维护/生成/导出在财务与管理员）
+                CcConstants.PERM_REG_REPORT_VIEW)));
         // 承运岗：温度超限/延误的处置岗位，可确认异常与提交处置结论；
         // V8：承运商并行提交报价
         put("carrier", 3L, "carrier123", "CARRIER", new LinkedHashSet<>(Arrays.asList(
@@ -172,7 +174,9 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_TRACE_EXPORT,
                 // V15：QA 复核承运商申诉（关联证据+产生改进任务）、查看评分台账
                 CcConstants.PERM_SCORE_VIEW,
-                CcConstants.PERM_SCORE_REVIEW)));
+                CcConstants.PERM_SCORE_REVIEW,
+                // V16：质量岗查看冷链运输监管报表台账（无口径维护/生成/导出权）
+                CcConstants.PERM_REG_REPORT_VIEW)));
         // V7 监管岗：按批次抽检（立项/封存/双人转移/结论）+ 抽检台账导出 + 冷链运输审批；
         // 具体能访问哪些监管区域由 t_cc_inspector_region 授权（EAST/NORTH），查询再按区域隔离；
         // V8：可查看承运商报价/锁价台账（无业务操作权）
@@ -186,14 +190,20 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_WINDOW_VIEW,
                 // V13：监管查看/导出追溯图（可见机构仍由机构授权表收窄）
                 CcConstants.PERM_TRACE_VIEW,
-                CcConstants.PERM_TRACE_EXPORT)));
+                CcConstants.PERM_TRACE_EXPORT,
+                // V16：监管岗查看并导出冷链运输监管报表（交叉核对列表/详情/导出/日志）
+                CcConstants.PERM_REG_REPORT_VIEW,
+                CcConstants.PERM_REG_REPORT_EXPORT)));
         // V7 第二个监管账号：仅授权 SOUTH 区域（用于跨区域隔离验收），无运输审批权
         put("inspector2", 8L, "inspector123", "INSPECTOR", new LinkedHashSet<>(Arrays.asList(
                 CcConstants.PERM_INSPECTION_VIEW,
                 CcConstants.PERM_INSPECTION_MANAGE,
                 CcConstants.PERM_QUOTE_VIEW,
                 // V10：监管可查看送达时窗/改期台账
-                CcConstants.PERM_WINDOW_VIEW)));
+                CcConstants.PERM_WINDOW_VIEW,
+                // V16：第二个监管账号同样可查看/导出监管报表（用于跨岗位验收）
+                CcConstants.PERM_REG_REPORT_VIEW,
+                CcConstants.PERM_REG_REPORT_EXPORT)));
         // V14 财务岗：费用合同版本维护、结算全字段查看（费率/单价/规则快照）、
         // 争议项复核（计入/不计入）、结算审核冻结、旧数据回放。无生成/争议发起权（职责分离）。
         put("finance", 10L, "finance123", "FINANCE", new LinkedHashSet<>(Arrays.asList(
@@ -206,7 +216,13 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_QUOTE_VIEW,
                 CcConstants.PERM_TRACE_VIEW,
                 // V15：财务可查看承运商评分台账（对账参考，无操作权）
-                CcConstants.PERM_SCORE_VIEW)));
+                CcConstants.PERM_SCORE_VIEW,
+                // V16：财务为监管报送归口——维护统计口径版本、手动生成/重算月报表、查看与导出；
+                // 重算只产生新版本，不覆盖已下载文件
+                CcConstants.PERM_REG_CALIBER_MANAGE,
+                CcConstants.PERM_REG_REPORT_VIEW,
+                CcConstants.PERM_REG_REPORT_EXPORT,
+                CcConstants.PERM_REG_REPORT_GENERATE)));
         // V9 车载设备网关账号：仅设备温度数据上报权限
         put("device", 9L, "device123", "DEVICE", new LinkedHashSet<>(Arrays.asList(
                 CcConstants.PERM_DEVICE_INGEST)));

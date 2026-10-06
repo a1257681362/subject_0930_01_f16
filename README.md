@@ -1410,3 +1410,101 @@ curl -u admin:admin123 -X POST http://localhost:8080/api/cold-chain/scores/tasks
 复核全拒绝）；逾期提醒外部依赖失败不假装成功（任务保持未提醒、失败流水留痕）、恢复后
 恰好一条成功通知（去重登记兜底、再扫描零新增、成功后重试拒绝）、任务完成只进不退；
 以及 401/403/200 权限矩阵。
+
+## 冷链运输 V16：冷链运输监管报表版本化
+
+在 V1~V15 台账上建立面向监管的**月度冷链运输监管报表**：按月汇总**发运量、超温时长、
+异常关闭率、退货数量**四项指标；统计口径版本化管理；**Quartz 每月定时生成并固化快照**，
+人工重算**只能产生新版本，绝不覆盖已下载文件**；报表缺少关键数据时**标记"待补"
+（PENDING_SUPPLEMENT）而不是静默填零**；生成失败**落错误链并告警**。验收冷链药品运输的
+"冷链运输监管报表版本化"不能只看详情，必须**交叉核对列表、导出与日志**四口径一致。
+
+### 核心规则
+
+- **统计口径版本化，只影响此后生成的报表**：`t_cc_reg_report_caliber` 版本只追加
+  （DRAFT→EFFECTIVE→SUPERSEDED）。口径含发运量归属（发运时刻）、超温时长取数来源
+  （温控预警连续超限时长）、异常关闭率关闭期限（天，0=不限）、退货归属（登记时间）、
+  失败告警 webhook。报表生成时**绑定当时生效口径并固化整版 JSON 快照**，此后口径调整不影响
+  已生成报表（与 V15 规则/周期同构）。
+- **按月汇总四项指标**（统计区间 `[月初,次月初)` 左闭右开）：
+  发运量=月内发运批次数 + 发运数量合计；
+  超温时长=月内触发温控预警的连续超限时长合计（分钟）；
+  异常关闭率=月内发生异常中已复核关闭占比（关闭期限 N 天口径下须按期关闭才计分子，N=0 不限）；
+  退货数量=月内登记退货数量合计。
+- **Quartz 定时生成 + 快照不可变**：`RegReportMonthlyJob`（默认每月 3 日 02:17 为上月出首版，
+  cron 可配）经 Spring 注入的 Quartz Job 触发；该月已有任意版本（含待补）则**幂等跳过**，
+  不重复、不覆盖。报表行 `t_cc_reg_report`（统计月+版本号唯一）一次写入，应用层无更新/删除路径。
+- **重算只能生成新版本**：人工对某月重算，无版本出 V1、已有版本只追加同月下一版本；
+  **绝不覆盖旧版本**，旧快照及其已下载文件永久可复核。导出文件名含统计月+版本号+报表编号
+  （`reg_report_2026-06_v1_JGxxxxxxxx.csv`），不同版本文件名不同，天然不覆盖。
+- **缺关键数据标待补，不静默填零**：源记录为 0 行记 0（真零，数据齐备）；源记录存在但关键数据
+  缺失——典型如月内存在**未挂温控预警（无设备连续超限时长背书）的温度超限异常**，确有超温却
+  无时长可计——则该指标数值留 NULL、列入 `pending_metrics` 并在 `supplement_note` 逐项写明
+  缺失对象（异常#/预警#/批次号），报表整体置 PENDING_SUPPLEMENT；其余指标照常给出。
+- **生成失败告警并保留错误链路**：口径载入/计算/持久化任一阶段失败，主事务回滚（**不产生可下载
+  报表行**），错误链 `t_cc_reg_report_error` 以独立事务固化阶段/类型/消息/**完整堆栈**与告警投递
+  结果；口径配置了 webhook 即投递告警（投递失败也在错误链留 FAILED+原因），未配置则站内留痕
+  （SITE）。历史错误链不随重算成功被删除。
+- **列表/详情/导出/日志交叉核对**：四者同读同一份不可变快照。详情回带待补指标与原因、
+  下载留痕、同统计月错误链；每次导出只追加 `t_cc_reg_report_download`（渠道/行数/内容
+  SHA-256/文件名/操作人），**同一版本重复导出 SHA-256 与文件名一致**，据此与列表、详情、
+  `t_cc_op_log`（生成/失败/导出动作）交叉核对。
+
+### 表结构增量（详见 schema.sql，版本标记 `cold-chain-16`）
+
+`t_cc_reg_report_caliber`（统计口径版本）、`t_cc_reg_report`（月度不可变报表快照，统计月+版本号
+唯一）、`t_cc_reg_report_error`（生成错误链，只追加）、`t_cc_reg_report_download`（导出留痕，
+只追加）；序列 `seq_cc_reg_report_no`（编号 `JG`+8位）。种子：监管报表口径 V1（发运按发运时刻、
+超温按温控预警时长、异常关闭不期限、退货按登记时间，默认生效）。
+
+### 接口增量（均在 `/api/cold-chain/reg-reports` 下，HTTP Basic）
+
+| 动作 | 方法与路径 | 权限 |
+| --- | --- | --- |
+| 口径版本列表 / 起草 / 发布 | `GET /calibers` · `POST /calibers/draft` · `POST /calibers/{id}/publish` | 查看 / `coldchain:regreport:caliber:manage` |
+| 报表列表（可按 statMonth 过滤） | `GET /?statMonth=yyyy-MM` | `coldchain:regreport:view` |
+| 手动生成/重算（只出新版本） | `POST /generate` `{"statMonth":"2026-06"}` | `coldchain:regreport:generate` |
+| 报表详情（快照+待补+下载留痕+错误链） | `GET /{id}` | `coldchain:regreport:view` |
+| 报表 CSV 导出（逐次留痕，不覆盖） | `GET /{id}/export` | `coldchain:regreport:export` |
+| 生成失败错误链台账 | `GET /errors?statMonth=yyyy-MM` | `coldchain:regreport:view` |
+
+权限分配：`finance`（监管报送归口）维护口径、手动生成/重算、查看、导出；`inspector`/`inspector2`
+查看、导出；`dispatcher`/`qa` 仅查看；`carrier`/`receiver` 无权限；`admin` 通配。
+
+示例（口径发版 → 重算出新版本 → 监管交叉核对 → 失败查错误链）：
+
+```bash
+# 财务发布新口径（异常关闭期限 7 天）；只影响此后生成的报表
+curl -u finance:finance123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/reg-reports/calibers/draft -d \
+  '{"versionName":"关闭期限口径","closeWindowDays":7,"changeReason":"监管要求按期关闭才计入"}'
+curl -u finance:finance123 -X POST http://localhost:8080/api/cold-chain/reg-reports/calibers/2/publish
+
+# Quartz 每月自动为上月出首版；也可人工对指定月生成/重算（重算只追加 V2，不覆盖 V1 已下载文件）
+curl -u finance:finance123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/reg-reports/generate -d '{"statMonth":"2026-06"}'
+
+# 监管交叉核对：列表 → 详情（待补/下载留痕/错误链）→ 导出（文件名带版本号，同版本重复导出 SHA 一致）
+curl -u inspector:inspector123 'http://localhost:8080/api/cold-chain/reg-reports?statMonth=2026-06'
+curl -u inspector:inspector123 http://localhost:8080/api/cold-chain/reg-reports/1
+curl -u inspector:inspector123 -OJ http://localhost:8080/api/cold-chain/reg-reports/1/export
+
+# 生成失败时查错误链（阶段/类型/消息/堆栈/告警投递结果），重算不删除历史错误链
+curl -u inspector:inspector123 'http://localhost:8080/api/cold-chain/reg-reports/errors?statMonth=2026-04'
+```
+
+Quartz 月度任务可通过配置开关/改 cron：`coldchain.reg-report.enabled`（默认 `true`）、
+`coldchain.reg-report.cron`（Quartz 6 段，默认 `0 17 2 3 * ?`，每月 3 日 02:17）。
+
+### V16 验收
+
+`RegReportVersioningIntegrationTest`（6 个用例，内存 H2 + 真实 Shiro HTTP Basic + 可控告警通道/
+故障计算替身，Mapper 直查物理表）覆盖：口径版本化（起草/发布热替换、报表绑定生成时生效口径、
+口径调整不改历史报表）与 Quartz 月度幂等（首版生成、已有版本跳过不覆盖）；四指标按月汇总
+（发运批次数/数量、预警超温时长合计、异常关闭率含 7 天期限判定、退货数量，空月=真零）；
+**列表/详情/导出/操作日志四口径交叉核对**（数值一致、同版本两次导出 SHA-256/文件名一致、
+导出留痕操作人与指标行数、生成/导出日志挂同一报表ID且摘要含版本/SHA）；重算只出新版本
+（V1 快照与已下载文件原封不动、V2 文件名不同不覆盖）；缺关键数据标待补（超温时长留 NULL
+不填 0、待补指标与原因在详情/导出可见、其余指标不受影响）；生成失败错误链（阶段/类型/消息/
+堆栈/webhook 投递失败留痕、不产生报表行、操作日志留痕）与恢复后重算成功、无生效口径站内
+SITE 告警；以及 401/403/200 权限矩阵。

@@ -761,4 +761,53 @@ public final class CcConstants {
     public static final String PERM_SCORE_TASK_HANDLE = "coldchain:score:task:handle";
     /** 逾期提醒手动重试 */
     public static final String PERM_SCORE_TASK_REMIND = "coldchain:score:task:remind";
+
+    // —— V16 冷链运输监管报表版本化 ——
+    /** 指标：发运量（当月发运批次数/发运数量，缺数据为 PENDING_SUPPLEMENT，不静默填 0） */
+    public static final String REG_METRIC_SHIPMENT = "SHIPMENT";
+    /** 指标：超温时长（分钟） */
+    public static final String REG_METRIC_OVERTEMP = "OVERTEMP_DURATION";
+    /** 指标：异常关闭率（%） */
+    public static final String REG_METRIC_CLOSE_RATE = "EXCEPTION_CLOSE_RATE";
+    /** 指标：退货数量 */
+    public static final String REG_METRIC_RETURN = "RETURN_QTY";
+
+    /** 报表生成结果：SUCCESS 已生成快照（含待补标记）/ PENDING_SUPPLEMENT 关键数据缺失已标待补 /
+     * FAILED 生成失败（已落错误链并告警，不产生可下载报表行） */
+    public static final String REPORT_SUCCESS = "SUCCESS";
+    public static final String REPORT_PENDING = "PENDING_SUPPLEMENT";
+    public static final String REPORT_FAILED = "FAILED";
+
+    /** 指标数据状态：OK 数据齐备 / PENDING_SUPPLEMENT 关键数据缺失待补（数值记 NULL，不静默填 0） */
+    public static final String METRIC_OK = "OK";
+    public static final String METRIC_PENDING = "PENDING_SUPPLEMENT";
+
+    /** 生成触发方式：SCHEDULED Quartz 定时 / MANUAL 人工手动（含重算） */
+    public static final String TRIGGER_SCHEDULED = "SCHEDULED";
+    public static final String TRIGGER_MANUAL = "MANUAL";
+
+    /** 下载留痕渠道 */
+    public static final String DOWNLOAD_CHANNEL_UI = "UI";
+    public static final String DOWNLOAD_CHANNEL_API = "API";
+
+    // V16 操作日志实体类型
+    public static final String ENT_REG_CALIBER = "REG_CALIBER";
+    public static final String ENT_REG_REPORT = "REG_REPORT";
+
+    // V16 操作动作
+    public static final String ACT_REG_CALIBER_DRAFT = "REG_CALIBER_DRAFT";
+    public static final String ACT_REG_CALIBER_PUBLISH = "REG_CALIBER_PUBLISH";
+    public static final String ACT_REG_REPORT_GENERATE = "REG_REPORT_GENERATE";
+    public static final String ACT_REG_REPORT_FAIL = "REG_REPORT_GENERATE_FAIL";
+    public static final String ACT_REG_REPORT_EXPORT = "REG_REPORT_EXPORT";
+
+    // —— V16 Shiro 权限点 ——
+    /** 监管报表统计口径版本维护（起草/发布新版本；只影响此后生成的报表） */
+    public static final String PERM_REG_CALIBER_MANAGE = "coldchain:regreport:caliber:manage";
+    /** 监管报表台账查看（列表/详情） */
+    public static final String PERM_REG_REPORT_VIEW = "coldchain:regreport:view";
+    /** 监管报表导出（逐次留痕，不覆盖已下载文件） */
+    public static final String PERM_REG_REPORT_EXPORT = "coldchain:regreport:export";
+    /** 手动生成/重算月度监管报表（重算只出新版本） */
+    public static final String PERM_REG_REPORT_GENERATE = "coldchain:regreport:generate";
 }
