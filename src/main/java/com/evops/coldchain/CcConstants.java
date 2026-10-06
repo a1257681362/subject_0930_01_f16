@@ -761,4 +761,60 @@ public final class CcConstants {
     public static final String PERM_SCORE_TASK_HANDLE = "coldchain:score:task:handle";
     /** 逾期提醒手动重试 */
     public static final String PERM_SCORE_TASK_REMIND = "coldchain:score:task:remind";
+
+    // —— V16 冷链运输监管报表版本化 ——
+    /** 口径版本状态复用 DRAFT / EFFECTIVE / SUPERSEDED */
+    /** 报表版本状态：已生成（数据齐全） */
+    public static final String REPORT_GENERATED = "GENERATED";
+    /** 报表版本状态：缺关键数据，待补（不静默填零） */
+    public static final String REPORT_PENDING_SUPPLEMENT = "PENDING_SUPPLEMENT";
+    /** 生成尝试结果 / 最新状态：失败（未产生快照版本） */
+    public static final String REPORT_FAILED = "FAILED";
+
+    /** 生成触发来源：Quartz 定时按月生成 */
+    public static final String REPORT_TRIGGER_SCHEDULED = "SCHEDULED";
+    /** 生成触发来源：手动重新计算 */
+    public static final String REPORT_TRIGGER_MANUAL = "MANUAL";
+
+    /** 发运量口径：按发运批次计数 */
+    public static final String SHIP_BASIS_BATCH = "SHIP_BATCH";
+    /** 发运量口径：按发运件数汇总 */
+    public static final String SHIP_BASIS_QTY = "SHIP_QTY";
+    /** 超温时长口径：温控预警达到容忍的连续超温时长 */
+    public static final String OVERTEMP_SOURCE_ALERT = "TEMP_ALERT";
+    /** 超温时长口径：温度留痕越温点差分 */
+    public static final String OVERTEMP_SOURCE_LOG = "TEMP_LOG";
+    /** 异常关闭率口径：按异常发现月归集 */
+    public static final String EXC_CLOSE_BASIS_FOUND = "FOUND_MONTH";
+    /** 异常关闭率口径：按关闭动作月归集 */
+    public static final String EXC_CLOSE_BASIS_RESOLVE = "RESOLVE_MONTH";
+    /** 退货数量口径：按登记月 */
+    public static final String RETURN_BASIS_REGISTER = "REGISTER_MONTH";
+
+    /** 指标代码：发运量 / 超温时长 / 异常关闭率 / 退货数量 */
+    public static final String METRIC_SHIP_VOLUME = "SHIP_VOLUME";
+    public static final String METRIC_OVERTEMP = "OVERTEMP";
+    public static final String METRIC_EXC_CLOSE = "EXC_CLOSE";
+    public static final String METRIC_RETURN = "RETURN";
+
+    // V16 操作日志实体类型
+    public static final String ENT_REG_REPORT = "REG_REPORT";
+    public static final String ENT_REG_CALIBER = "REG_REPORT_CALIBER";
+
+    // V16 操作动作
+    public static final String ACT_REG_CALIBER_DRAFT = "REG_CALIBER_DRAFT";
+    public static final String ACT_REG_CALIBER_PUBLISH = "REG_CALIBER_PUBLISH";
+    public static final String ACT_REG_REPORT_GENERATE = "REG_REPORT_GENERATE";
+    public static final String ACT_REG_REPORT_DOWNLOAD = "REG_REPORT_DOWNLOAD";
+    public static final String ACT_REG_REPORT_ALERT = "REG_REPORT_ALERT";
+
+    // —— V16 Shiro 权限点 ——
+    /** 监管报表台账查看（列表/详情/日志，另按监管区域隔离） */
+    public static final String PERM_REPORT_VIEW = "coldchain:report:view";
+    /** 监管报表口径版本维护（起草/发布） */
+    public static final String PERM_REPORT_CALIBER_MANAGE = "coldchain:report:caliber:manage";
+    /** 监管报表生成/重新计算（手动触发） */
+    public static final String PERM_REPORT_GENERATE = "coldchain:report:generate";
+    /** 监管报表版本文件导出下载 */
+    public static final String PERM_REPORT_EXPORT = "coldchain:report:export";
 }

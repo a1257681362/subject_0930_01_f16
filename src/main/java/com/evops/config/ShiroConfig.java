@@ -366,6 +366,34 @@ public class ShiroConfig {
         chain.addPathDefinition("/api/cold-chain/scores/**",
                 "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_SCORE_VIEW + "]");
 
+        // —— V16 冷链运输监管报表版本化（写/下载路径在前，宽泛只读在后）——
+        // 统计口径版本维护（起草/发布）
+        chain.addPathDefinition("/api/cold-chain/reports/calibers/draft",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_CALIBER_MANAGE + "]");
+        chain.addPathDefinition("/api/cold-chain/reports/calibers/*/publish",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_CALIBER_MANAGE + "]");
+        // 生成 / 重新计算 / 手动定时扫描
+        chain.addPathDefinition("/api/cold-chain/reports/generate",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_GENERATE + "]");
+        chain.addPathDefinition("/api/cold-chain/reports/scan",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_GENERATE + "]");
+        // 版本文件下载（独立导出权限）
+        chain.addPathDefinition("/api/cold-chain/reports/*/versions/*/download",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_EXPORT + "]");
+        chain.addPathDefinition("/api/cold-chain/reports/*/download",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_EXPORT + "]");
+        // 口径版本只读
+        chain.addPathDefinition("/api/cold-chain/reports/calibers/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_VIEW + "]");
+        // 报表列表/详情/版本/运行记录只读（另在服务层按监管区域隔离）
+        chain.addPathDefinition("/api/cold-chain/reports/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_VIEW + "]");
+        chain.addPathDefinition("/api/cold-chain/reports",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_VIEW + "]");
+        // 监管报表页面
+        chain.addPathDefinition("/ui/cold-chain/reports",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_REPORT_VIEW + "]");
+
         // 冷链台账接口与管理页面使用 HTTP Basic，便于 curl/联调；浏览器会弹出登录框
         chain.addPathDefinition("/api/**", "authcBasic");
         chain.addPathDefinition("/ui/**", "authcBasic");

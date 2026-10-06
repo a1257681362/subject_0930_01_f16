@@ -78,4 +78,7 @@ public interface SequenceMapper {
 
     @Select("SELECT NEXT VALUE FOR seq_cc_improve_task_no")
     Long nextImproveTaskNo();
+
+    @Select("SELECT NEXT VALUE FOR seq_cc_reg_report_no")
+    Long nextRegReportNo();
 }

@@ -1410,3 +1410,92 @@ curl -u admin:admin123 -X POST http://localhost:8080/api/cold-chain/scores/tasks
 复核全拒绝）；逾期提醒外部依赖失败不假装成功（任务保持未提醒、失败流水留痕）、恢复后
 恰好一条成功通知（去重登记兜底、再扫描零新增、成功后重试拒绝）、任务完成只进不退；
 以及 401/403/200 权限矩阵。
+
+## 冷链运输 V16：冷链运输监管报表版本化
+
+在 V1~V15 台账上新增面向监管的**月度运输监管报表**：按自然月汇总**发运量、超温时长、
+异常关闭率、退货数量**四项指标；**统计口径由版本管理**，每次生成绑定当前生效口径并固化
+整版快照；**Quartz 定时按月生成后保存快照**，重新计算**只能生成新版本、不能覆盖已下载
+文件**；报表缺少关键数据时标记**待补**而不是静默填零；生成失败要**告警并保留错误链路**。
+
+### 核心规则
+
+- **四指标按月 + 按监管区域汇总**（窗口左闭右开 `[月初,次月初)`）：
+  发运量=`t_cc_transport_batch` 按 `ship_time` 落月（口径可选批次数 `SHIP_BATCH`/件数
+  `SHIP_QTY`，可配置是否含已撤回）；超温时长=`t_cc_temp_alert.duration_minutes` 按
+  `start_time` 落月求和（另支持按温度留痕越温点差分 `TEMP_LOG`）；异常关闭率=
+  `t_cc_exception` 当月发现异常中 `RESOLVED` 占比（`FOUND_MONTH`，另支持按月处置吞吐
+  `RESOLVE_MONTH`），分母为 0 记 NULL；退货数量=`t_cc_return_batch.return_qty` 按登记
+  `create_time` 落月。区域取批次 `supervise_region`（温度/异常/退货经批次关联）；
+  始终产出一个**全域汇总桶**与各区域桶。
+- **统计口径版本化**（`t_cc_reg_report_caliber`，DRAFT→EFFECTIVE→SUPERSEDED 只追加）：
+  每次生成时绑定当前生效版本并把整版口径 JSON 固化到版本快照；**口径调整只影响此后生成的
+  报表**，历史版本口径与数值不变。
+- **版本化快照，重新计算只追加不覆盖**：一个"自然月+区域"是一张报表
+  （`t_cc_reg_report`），每次生成追加一行 `t_cc_reg_report_version`（`version_no` 递增，
+  `UNIQUE(report_id,version_no)` 兜底，CreateOnlyEntity 无更新/删除路径），并落一份
+  **版本化文件** `reg_report_<报表号>_v<n>.csv`；同事务推进主表当前版本。已下载
+  （`downloaded=TRUE`，只进不退）的历史文件绝不会被重新计算覆盖。
+- **缺关键数据标记待补，不静默填零**：当月有发运活动但无任何温度留痕时，超温时长无法
+  核算 → 指标值 NULL、版本状态 `PENDING_SUPPLEMENT`、`missing_metrics` 记录缺项；
+  异常关闭率无样本记 NULL。发运/退货的真实 0 与"数据缺失"严格区分。
+- **生成失败告警并保留错误链路**：每次尝试写 `t_cc_reg_report_run`（attempt_no 递增，
+  含 error_type/message/逐环 cause 链/完整堆栈），失败不产生版本、主表置 FAILED；
+  同时写 `t_cc_reg_report_alert`（复用 V6 通知通道，webhook 可失败，失败只留流水不假装
+  成功）；修正后再次生成得到新版本，失败行原样保留。
+- **列表/详情/导出/日志同一口径**：列表给当前版本状态，详情含全部版本+运行记录+操作
+  日志，导出读取落盘版本快照（不实时重算），关键动作（生成/下载）逐条写 `t_cc_op_log`。
+- **区域隔离**：监管账号仅见授权区域的报表（`inspector` EAST/NORTH、`inspector2` SOUTH），
+  全域汇总报表仅全域账号可见/可生成；越权访问/生成直接拒绝。
+
+### 表结构增量（详见 schema.sql，版本标记 `cold-chain-16`）
+
+`t_cc_reg_report_caliber`（统计口径版本）、`t_cc_reg_report`（月+区域报表主表）、
+`t_cc_reg_report_version`（不可变版本快照，含四指标/待补标记/版本化文件名/下载登记）、
+`t_cc_reg_report_run`（生成尝试与错误链路，只追加）、
+`t_cc_reg_report_alert`（失败告警流水，只追加）；序列 `seq_cc_report_no`（编号 `JG`+8位）。
+种子：内置口径 V1（批次数 / 温控预警时长 / 发现月关闭率 / 登记月退货，不含撤回，站内必达）。
+
+### 接口增量（均在 `/api/cold-chain/reports` 下，HTTP Basic）
+
+| 动作 | 方法与路径 | 权限 |
+| --- | --- | --- |
+| 口径列表 / 起草 / 发布 | `GET /calibers` · `POST /calibers/draft` · `POST /calibers/{id}/publish` | 查看 / `coldchain:report:caliber:manage` |
+| 生成/重新计算（新版本）· 手动定时扫描 | `POST /generate` · `POST /scan` | `coldchain:report:generate` |
+| 报表列表 / 详情（版本+运行+日志） | `GET /` · `GET /{id}` | `coldchain:report:view`（再按区域隔离） |
+| 版本列表 / 运行记录 / 运行错误详情 | `GET /{id}/versions` · `GET /{id}/runs` · `GET /runs/{runId}` | `coldchain:report:view` |
+| 版本文件下载 / 最新版下载 | `GET /{id}/versions/{v}/download` · `GET /{id}/download` | `coldchain:report:export` |
+
+页面：`/ui/cold-chain/reports`（`RegReportPageController` + `templates/coldchain/reports.html`）。
+定时任务 `RegReportGenerateScheduler`（默认每小时一次，启动 30s 后）幂等为上一自然月生成全域
+报表，已有成功版本则跳过；可用 `coldchain.reg-report.enabled=false` 关闭、
+`coldchain.reg-report.export-dir` 配置快照目录（默认 `./data/reg-reports`，测试 `./target/reg-reports-test`）。
+
+示例：
+
+```bash
+# 管理员为指定月/区域生成（或重新计算，始终新增版本）
+curl -u admin:admin123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/reports/generate \
+  -d '{"reportMonth":"2026-09","superviseRegion":""}'
+
+# 手动触发一次定时口径扫描（已有版本则跳过）
+curl -u admin:admin123 -X POST 'http://localhost:8080/api/cold-chain/reports/scan?month=2026-09'
+
+# 下载指定版本（版本化文件名，不随重算改变）
+curl -u admin:admin123 -OJ \
+  http://localhost:8080/api/cold-chain/reports/1/versions/1/download
+```
+
+### V16 验收
+
+`RegReportVersionedIntegrationTest`（6 个用例，内存 H2 + 真实 Shiro HTTP Basic + 可控通知
+通道替身 + 落盘快照逐字节比对，Mapper 直查物理表）覆盖：定时按月生成的四指标全域/区域
+分桶（发运批次数、超温时长求和、关闭率 2/3=66.67%、退货件数/笔数，无异常样本关闭率
+NULL）；缺温度留痕标记 PENDING_SUPPLEMENT（超温时长 NULL 不填零）；口径版本化（发布 V2
+改按件数只影响新版本，历史 V1 口径与数值不变）；重新计算只追加 V2/V3 不覆盖已下载 V1 文件
+（磁盘逐字节一致、下载标记只进不退）并**交叉核对列表 currentVersion、详情各版本指标、
+导出文件内容、操作日志生成/下载记录四者一致**；监管区域隔离（inspector/inspector2 各见
+授权区、全域报表不可见、越权生成拒绝）与 401/403/200 权限矩阵；以及生成失败（目录占用致
+落盘失败）时主表 FAILED、运行记录保留错误类型/cause 链/堆栈、WEBHOOK 首次投递失败留痕、
+失败不产生版本、恢复后重试成功且失败行保留。

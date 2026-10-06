@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>冷链运输监管报表（版本化）</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f4f6f9; color: #263238; }
+        header { background: #4a148c; color: #fff; padding: 14px 24px; font-size: 18px; font-weight: bold; }
+        main { max-width: 1440px; margin: 18px auto; padding: 0 16px; }
+        section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 16px 20px; margin-bottom: 18px; }
+        h2 { font-size: 16px; margin: 0 0 12px; padding-left: 8px; border-left: 4px solid #4a148c; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #f3e5f5; white-space: nowrap; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+        .grid label { display: flex; flex-direction: column; font-size: 12px; color: #546e7a; gap: 3px; }
+        input, select { padding: 5px 7px; border: 1px solid #b0bec5; border-radius: 4px; font-size: 13px; }
+        button { padding: 5px 12px; border: none; border-radius: 4px; background: #4a148c; color: #fff; cursor: pointer; font-size: 12px; margin: 2px 4px 2px 0; }
+        button.ghost { background: #6a1b9a; }
+        .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+        .tag.generated { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .tag.pending { background: #fff8e1; color: #ef6c00; border: 1px solid #ffe082; }
+        .tag.failed { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .tag.effective { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .tag.draft { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+        .tag.superseded { background: #eceff1; color: #546e7a; border: 1px solid #cfd8dc; }
+        .muted { color: #78909c; font-size: 12px; }
+        .banner { border-radius: 8px; padding: 10px 18px; margin-bottom: 18px; font-size: 13px;
+                  background: #f3e5f5; color: #4a148c; border: 1px solid #ce93d8; line-height: 1.7; }
+        .msg { margin: 8px 0; font-size: 13px; white-space: pre-wrap; }
+        .msg.ok { color: #2e7d32; } .msg.err { color: #c62828; }
+        details { margin-top: 6px; } summary { cursor: pointer; color: #4a148c; font-size: 12px; }
+        a.dl { color: #4a148c; text-decoration: none; border: 1px solid #ce93d8; border-radius: 4px; padding: 1px 7px; font-size: 12px; }
+        a.dl:hover { background: #f3e5f5; }
+        pre.chain { background: #fafafa; border: 1px solid #eee; padding: 6px; font-size: 11px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<header>冷链 V16 · 冷链运输监管报表版本化（按月：发运量 · 超温时长 · 异常关闭率 · 退货数量 · 口径版本化 · 快照只追加）</header>
+<main>
+
+    <div class="banner">
+        统计口径<b>版本化</b>：每次生成绑定当前生效口径并固化快照，口径调整只影响此后生成的报表。<br>
+        定时按月生成快照；<b>重新计算只生成新版本，不覆盖历史版本与已下载文件</b>（每个版本独立版本化文件名）。<br>
+        报表缺少关键数据时标记 <b>待补 PENDING_SUPPLEMENT</b>（缺失指标为 NULL，不静默填零）；
+        生成失败会<b>告警并保留错误链路</b>（运行记录含异常类型/原因链/堆栈）。
+        <br><span class="muted">列表 / 详情 / 导出文件 / 操作日志四者同口径，可交叉核对。</span>
+    </div>
+
+    <div id="globalMsg" class="msg"></div>
+
+    <!-- 1) 生成 / 重新计算 -->
+    <section th:if="${canGenerate}">
+        <h2>1. 生成 / 重新计算（始终新增版本）</h2>
+        <form id="genForm" class="grid" onsubmit="return false;">
+            <label>统计自然月（yyyy-MM）
+                <input name="reportMonth" required pattern="\d{4}-(0[1-9]|1[0-2])" placeholder="如 2026-09">
+            </label>
+            <label>监管区域（空=全域汇总）
+                <input name="superviseRegion" placeholder="如 EAST / NORTH / SOUTH；留空=全域">
+            </label>
+            <label style="justify-content:flex-end;">
+                <button type="button" onclick="generate(false)">生成 / 重新计算（新版本）</button>
+            </label>
+            <label style="justify-content:flex-end;">
+                <button type="button" class="ghost" onclick="generate(true)">按定时口径扫描（已有版本则跳过）</button>
+            </label>
+        </form>
+    </section>
+
+    <!-- 2) 统计口径版本 -->
+    <section>
+        <h2>2. 统计口径版本（版本只追加，调整只影响此后报表）</h2>
+        <table>
+            <thead><tr><th>版本</th><th>名称</th><th>状态</th><th>发运量</th><th>超温时长</th>
+                <th>异常关闭率</th><th>退货</th><th>含撤回</th><th>发布时间</th><th>操作</th></tr></thead>
+            <tbody>
+            <tr th:each="c : ${calibers}">
+                <td th:text="'V' + ${c.versionNo}"></td>
+                <td th:text="${c.versionName}"></td>
+                <td><span class="tag" th:classappend="${c.status == 'EFFECTIVE'} ? 'effective' : (${c.status == 'DRAFT'} ? 'draft' : 'superseded')"
+                          th:text="${c.status}"></span></td>
+                <td th:text="${c.shipQtyBasis}"></td>
+                <td th:text="${c.overtempSource}"></td>
+                <td th:text="${c.exceptionCloseBasis}"></td>
+                <td th:text="${c.returnBasis}"></td>
+                <td th:text="${c.includeRevoked} ? '是' : '否'"></td>
+                <td th:text="${c.publishTime} ?: '—'"></td>
+                <td>
+                    <button th:if="${canCaliberManage && c.status == 'DRAFT'}"
+                            th:onclick="'publishCaliber(' + ${c.id} + ')'">发布</button>
+                    <span th:if="${!canCaliberManage || c.status != 'DRAFT'}" class="muted">—</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+
+        <div th:if="${canCaliberManage}" style="margin-top:12px;">
+            <details>
+                <summary>起草新口径版本</summary>
+                <form id="caliberForm" class="grid" onsubmit="return false;" style="margin-top:10px;">
+                    <label>版本名称<input name="versionName" required></label>
+                    <label>发运量口径
+                        <select name="shipQtyBasis">
+                            <option value="SHIP_BATCH">SHIP_BATCH 批次数</option>
+                            <option value="SHIP_QTY">SHIP_QTY 件数</option>
+                        </select>
+                    </label>
+                    <label>超温时长口径
+                        <select name="overtempSource">
+                            <option value="TEMP_ALERT">TEMP_ALERT 温控预警时长</option>
+                            <option value="TEMP_LOG">TEMP_LOG 温度留痕差分</option>
+                        </select>
+                    </label>
+                    <label>异常关闭率口径
+                        <select name="exceptionCloseBasis">
+                            <option value="FOUND_MONTH">FOUND_MONTH 当月发现异常关闭占比</option>
+                            <option value="RESOLVE_MONTH">RESOLVE_MONTH 当月处置吞吐</option>
+                        </select>
+                    </label>
+                    <label>退货数量口径
+                        <select name="returnBasis"><option value="REGISTER_MONTH">REGISTER_MONTH 登记月</option></select>
+                    </label>
+                    <label>含已撤回批次
+                        <select name="includeRevoked"><option value="false">否</option><option value="true">是</option></select>
+                    </label>
+                    <label>失败告警 webhook（空=站内必达）<input name="notifyEndpoint"></label>
+                    <label>变更原因<input name="changeReason" required></label>
+                    <label style="justify-content:flex-end;"><button type="button" onclick="draftCaliber()">起草版本</button></label>
+                </form>
+            </details>
+        </div>
+    </section>
+
+    <!-- 3) 报表台账 -->
+    <section>
+        <h2>3. 监管报表台账（展开看版本 / 运行记录 / 操作日志）</h2>
+        <table>
+            <thead><tr><th>报表编号</th><th>统计月</th><th>区域</th><th>当前版本</th>
+                <th>最新状态</th><th>操作</th></tr></thead>
+            <tbody>
+            <tr th:if="${#lists.isEmpty(reports)}">
+                <td colspan="6" class="muted">暂无报表（定时按月生成，或在上方手动生成/重新计算）。</td>
+            </tr>
+            <tr th:each="r : ${reports}">
+                <td th:text="${r.reportNo}"></td>
+                <td th:text="${r.reportMonth}"></td>
+                <td th:text="${#strings.isEmpty(r.superviseRegion)} ? '全域汇总' : ${r.superviseRegion}"></td>
+                <td th:text="${r.currentVersion == 0} ? '—' : 'V' + ${r.currentVersion}"></td>
+                <td>
+                    <span class="tag generated" th:if="${r.latestStatus == 'GENERATED'}">GENERATED</span>
+                    <span class="tag pending" th:if="${r.latestStatus == 'PENDING_SUPPLEMENT'}">PENDING_SUPPLEMENT 待补</span>
+                    <span class="tag failed" th:if="${r.latestStatus == 'FAILED'}">FAILED 生成失败</span>
+                    <span class="muted" th:if="${r.latestStatus == null}">—</span>
+                </td>
+                <td>
+                    <a class="dl" th:if="${canExport && r.currentVersion > 0}"
+                       th:href="'/api/cold-chain/reports/' + ${r.id} + '/download'">下载最新版 CSV</a>
+                    <button type="button" onclick="toggleDetail(this)" th:attr="data-id=${r.id}">详情/版本/日志</button>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <div id="detailArea"></div>
+    </section>
+</main>
+
+<script>
+    var API = '/api/cold-chain';
+    function showMsg(text, ok) {
+        var el = document.getElementById('globalMsg');
+        el.className = 'msg ' + (ok ? 'ok' : 'err');
+        el.textContent = text;
+    }
+    function postJson(path, data) {
+        return fetch(API + path, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            credentials: 'same-origin', body: JSON.stringify(data)
+        }).then(function (r) { return r.json(); });
+    }
+    function generate(scanMode) {
+        var f = document.getElementById('genForm');
+        var body = {
+            reportMonth: f.reportMonth.value.trim(),
+            superviseRegion: f.superviseRegion.value.trim()
+        };
+        if (scanMode) {
+            var q = '?month=' + encodeURIComponent(body.reportMonth)
+                + '&region=' + encodeURIComponent(body.superviseRegion);
+            postJson('/reports/scan' + q, {}).then(function () { location.reload(); });
+        } else {
+            postJson('/reports/generate', body).then(function (resp) {
+                if (resp.success) { showMsg('已生成新版本：V' + resp.data.versionNo + '，状态=' + resp.data.status, true); }
+                else { showMsg(resp.message, false); }
+                setTimeout(location.reload.bind(location), 900);
+            });
+        }
+    }
+    function publishCaliber(id) {
+        postJson('/reports/calibers/' + id + '/publish', {}).then(function (resp) {
+            showMsg(resp.success ? '口径已发布生效' : resp.message, resp.success);
+            if (resp.success) setTimeout(location.reload.bind(location), 800);
+        });
+    }
+    function draftCaliber() {
+        var f = document.getElementById('caliberForm');
+        var body = {
+            versionName: f.versionName.value.trim(),
+            shipQtyBasis: f.shipQtyBasis.value,
+            overtempSource: f.overtempSource.value,
+            exceptionCloseBasis: f.exceptionCloseBasis.value,
+            returnBasis: f.returnBasis.value,
+            includeRevoked: f.includeRevoked.value === 'true',
+            notifyEndpoint: f.notifyEndpoint.value.trim(),
+            changeReason: f.changeReason.value.trim()
+        };
+        postJson('/reports/calibers/draft', body).then(function (resp) {
+            showMsg(resp.success ? '口径草稿已创建（需发布才生效）' : resp.message, resp.success);
+            if (resp.success) setTimeout(location.reload.bind(location), 800);
+        });
+    }
+    function nv(x) { return (x === null || x === undefined || x === '') ? 'NULL(待补/无样本)' : x; }
+    function statusTag(s) {
+        var cls = s === 'GENERATED' ? 'generated' : (s === 'PENDING_SUPPLEMENT' ? 'pending' : 'failed');
+        return '<span class="tag ' + cls + '">' + s + '</span>';
+    }
+    function toggleDetail(btn) {
+        var id = btn.getAttribute('data-id');
+        var area = document.getElementById('detailArea');
+        var existing = document.getElementById('detail-' + id);
+        if (existing) { existing.remove(); return; }
+        fetch(API + '/reports/' + id, {credentials: 'same-origin'})
+            .then(function (r) { return r.json(); })
+            .then(function (env) {
+                if (!env.success) { showMsg(env.message, false); return; }
+                var d = env.data, h = [];
+                h.push('<div id="detail-' + id + '" style="margin-top:10px;border-top:2px dashed #ce93d8;padding-top:8px;">');
+                h.push('<h2 style="border-left-color:#6a1b9a;">报表 ' + d.report.reportNo + ' 详情（' + d.report.reportMonth
+                    + ' / ' + (d.report.superviseRegion || '全域汇总') + '）</h2>');
+                h.push('<table><thead><tr><th>版本</th><th>状态</th><th>口径</th><th>发运量</th><th>超温(分)</th>'
+                    + '<th>异常总数</th><th>已关闭</th><th>关闭率%</th><th>退货数(笔)</th><th>触发</th><th>已下载</th><th>下载</th></tr></thead><tbody>');
+                (d.versions || []).forEach(function (v) {
+                    h.push('<tr><td>V' + v.versionNo + '</td><td>' + statusTag(v.status) + '</td>'
+                        + '<td>V' + v.caliberVersionNo + '</td>'
+                        + '<td>' + nv(v.shipVolume) + '</td><td>' + nv(v.overtempMinutes) + '</td>'
+                        + '<td>' + nv(v.exceptionTotal) + '</td><td>' + nv(v.exceptionClosed) + '</td>'
+                        + '<td>' + nv(v.exceptionCloseRate) + '</td>'
+                        + '<td>' + nv(v.returnQty) + '(' + nv(v.returnCount) + ')</td>'
+                        + '<td>' + v.triggerSource + '</td>'
+                        + '<td>' + (v.downloaded ? ('是 ' + (v.downloadByName || '')) : '否') + '</td>'
+                        + '<td>' + ('<a class="dl" href="' + API + '/reports/' + id + '/versions/' + v.versionNo
+                            + '/download">下载 V' + v.versionNo + '</a>') + '</td></tr>');
+                    if (v.pendingNote) { h.push('<tr><td colspan="12" class="muted">待补说明：' + v.pendingNote + '</td></tr>'); }
+                });
+                h.push('</tbody></table>');
+                h.push('<details open><summary>生成运行记录（含失败错误链路，共 ' + (d.runs || []).length + ' 条）</summary>');
+                h.push('<table style="margin-top:6px;"><thead><tr><th>#</th><th>尝试</th><th>来源</th><th>口径</th>'
+                    + '<th>结果</th><th>版本</th><th>时间</th><th>错误类型/原因</th></tr></thead><tbody>');
+                (d.runs || []).forEach(function (r) {
+                    var err = r.runStatus === 'FAILED'
+                        ? ('<b>' + nv(r.errorType) + '</b>: ' + nv(r.errorMessage)
+                            + (r.errorChain ? (' <a class="dl" href="' + API + '/reports/runs/' + r.id + '" target="_blank">错误链路/堆栈</a>') : ''))
+                        : '—';
+                    h.push('<tr><td>' + r.id + '</td><td>' + r.attemptNo + '</td><td>' + r.triggerSource + '</td>'
+                        + '<td>' + nv(r.caliberVersionNo) + '</td>'
+                        + '<td>' + (r.runStatus === 'SUCCESS' ? 'SUCCESS' : '<span class="tag failed">FAILED</span>') + '</td>'
+                        + '<td>' + (r.versionId || '—') + '</td><td>' + r.runTime + '</td><td>' + err + '</td></tr>');
+                });
+                h.push('</tbody></table></details>');
+                h.push('<details><summary>操作日志（共 ' + (d.opLogs || []).length + ' 条）</summary>');
+                h.push('<table style="margin-top:6px;"><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>摘要</th></tr></thead><tbody>');
+                (d.opLogs || []).forEach(function (l) {
+                    h.push('<tr><td>' + l.createTime + '</td><td>' + (l.operator || '') + '</td><td>' + l.action + '</td><td>' + (l.summary || '') + '</td></tr>');
+                });
+                h.push('</tbody></table></details>');
+                h.push('</div>');
+                area.insertAdjacentHTML('beforeend', h.join(''));
+            });
+    }
+</script>
+</body>
+</html>

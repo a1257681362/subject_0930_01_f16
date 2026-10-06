@@ -186,14 +186,21 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_WINDOW_VIEW,
                 // V13：监管查看/导出追溯图（可见机构仍由机构授权表收窄）
                 CcConstants.PERM_TRACE_VIEW,
-                CcConstants.PERM_TRACE_EXPORT)));
+                CcConstants.PERM_TRACE_EXPORT,
+                // V16：监管岗查看/导出监管报表（按授权区域隔离），并可对授权区域重新计算生成新版本
+                CcConstants.PERM_REPORT_VIEW,
+                CcConstants.PERM_REPORT_EXPORT,
+                CcConstants.PERM_REPORT_GENERATE)));
         // V7 第二个监管账号：仅授权 SOUTH 区域（用于跨区域隔离验收），无运输审批权
         put("inspector2", 8L, "inspector123", "INSPECTOR", new LinkedHashSet<>(Arrays.asList(
                 CcConstants.PERM_INSPECTION_VIEW,
                 CcConstants.PERM_INSPECTION_MANAGE,
                 CcConstants.PERM_QUOTE_VIEW,
                 // V10：监管可查看送达时窗/改期台账
-                CcConstants.PERM_WINDOW_VIEW)));
+                CcConstants.PERM_WINDOW_VIEW,
+                // V16：监管查看/导出监管报表（仅授权 SOUTH 区域，全域汇总不可见）
+                CcConstants.PERM_REPORT_VIEW,
+                CcConstants.PERM_REPORT_EXPORT)));
         // V14 财务岗：费用合同版本维护、结算全字段查看（费率/单价/规则快照）、
         // 争议项复核（计入/不计入）、结算审核冻结、旧数据回放。无生成/争议发起权（职责分离）。
         put("finance", 10L, "finance123", "FINANCE", new LinkedHashSet<>(Arrays.asList(

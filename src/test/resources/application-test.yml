@@ -27,3 +27,7 @@ coldchain:
     enabled: false
   score-remind:
     enabled: false
+  # V16 监管报表定时生成（集成测试直调服务，避免定时器干扰）
+  reg-report:
+    enabled: false
+    export-dir: ./target/reg-reports-test
