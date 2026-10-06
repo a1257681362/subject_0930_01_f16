@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>冷链运输费用预结算</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f4f6f9; color: #263238; }
+        header { background: #283593; color: #fff; padding: 14px 24px; font-size: 18px; font-weight: bold; }
+        main { max-width: 1440px; margin: 18px auto; padding: 0 16px; }
+        section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 16px 20px; margin-bottom: 18px; }
+        h2 { font-size: 16px; margin: 0 0 12px; padding-left: 8px; border-left: 4px solid #283593; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #e8eaf6; white-space: nowrap; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+        .grid label { display: flex; flex-direction: column; font-size: 12px; color: #546e7a; gap: 3px; }
+        input, select, textarea { padding: 5px 7px; border: 1px solid #b0bec5; border-radius: 4px; font-size: 13px; }
+        button { padding: 5px 12px; border: none; border-radius: 4px; background: #283593; color: #fff; cursor: pointer; font-size: 12px; margin: 2px 4px 2px 0; }
+        button.ghost { background: #607d8b; }
+        button.warn { background: #ef6c00; }
+        button.ok { background: #2e7d32; }
+        .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+        .tag.pending { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+        .tag.disputed { background: #fff8e1; color: #ef6c00; border: 1px solid #ffe082; }
+        .tag.audited { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .tag.pen { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .tag.base { background: #e8eaf6; color: #283593; border: 1px solid #9fa8da; }
+        .muted { color: #78909c; font-size: 12px; }
+        .banner { border-radius: 8px; padding: 10px 18px; margin-bottom: 18px; font-size: 13px;
+                  background: #e8eaf6; color: #283593; border: 1px solid #9fa8da; }
+        .msg { margin: 8px 0; font-size: 13px; white-space: pre-wrap; }
+        .msg.ok { color: #2e7d32; } .msg.err { color: #c62828; }
+        .basis { font-size: 12px; color: #455a64; line-height: 1.6; }
+        .basis.pricing { color: #283593; background: #f5f6ff; border-left: 3px solid #9fa8da; padding: 4px 8px; margin-top: 4px; }
+        .masked { color: #c62828; font-weight: bold; }
+        .totals b { color: #283593; font-size: 14px; }
+        .diffpos { color: #2e7d32; font-weight: bold; }
+        .diffneg { color: #c62828; font-weight: bold; }
+        details { margin-top: 6px; } summary { cursor: pointer; color: #283593; font-size: 12px; }
+    </style>
+</head>
+<body>
+<header>冷链 V14 · 运输费用预结算（箱型×里程基础运费 · 延误/超温/封签按合同版本扣罚 · 结算快照 · 争议待复核 · 财务审核冻结）</header>
+<main>
+
+    <div class="banner">
+        规则按<b>合同版本</b>生效，生成结算单即固化<b>整版规则快照+逐项费用快照</b>；
+        费用预览逐项列出<b>业务依据</b>与（财务可见的）<b>计价依据</b>；
+        争议项进入<b>待复核</b>，财务复核决定扣罚计入/不计入；
+        <b>已审核结算不会被新合同版本重算</b>；财务与运营看到的字段范围不同；
+        发布新版本后可对冷链药品运输旧数据<b>回放</b>，差异逐项解释。
+        <br><span class="muted">当前视图口径：<b th:text="${financeScope} ? '财务（含费率/单价/规则快照/审核信息）' : '运营（仅业务依据/金额/争议状态，费率与单价掩码）'"></b></span>
+    </div>
+
+    <div id="globalMsg" class="msg"></div>
+
+    <!-- 1) 预结算预览/生成 -->
+    <section>
+        <h2>1. 费用预览 / 生成预结算单</h2>
+        <form id="previewForm" class="grid" onsubmit="return false;">
+            <label>已签收运输批次
+                <select name="batchId" required>
+                    <option value="">— 选择批次 —</option>
+                    <option th:each="b : ${batches}" th:value="${b.id}"
+                            th:text="${b.batchNo} + '（' + ${b.receiverOrg} + '）'"></option>
+                </select>
+            </label>
+            <label>合同版本（空=当前生效版本）
+                <select name="contractId">
+                    <option value="">当前生效版本</option>
+                    <option th:each="c : ${contracts}" th:value="${c.id}"
+                            th:text="'V' + ${c.versionNo} + ' ' + ${c.versionName} + '（' + ${c.status} + '）'"></option>
+                </select>
+            </label>
+            <label>箱型覆盖（默认取锁价单快照）
+                <select name="boxType">
+                    <option value="">— 默认锁价单箱型 —</option>
+                    <option value="REFRIGERATED_BOX">冷藏箱</option>
+                    <option value="INSULATED_BOX">保温箱</option>
+                    <option value="DRY_ICE_BOX">干冰箱</option>
+                    <option value="FULL_TRUCK">整车冷藏车厢</option>
+                    <option value="LTL">零担拼舱</option>
+                </select>
+            </label>
+            <label>计费里程覆盖（公里；无路线批次必填）<input name="mileageKm" type="number" step="0.01" min="0"></label>
+        </form>
+        <div style="margin-top:10px;">
+            <button onclick="doPreview()">预览费用依据（不落库）</button>
+            <button class="ok" th:if="${canGenerate}" onclick="doGenerate()">生成预结算单（固化快照）</button>
+            <span class="muted">预览不写库；生成后争议/复核/审核在第 3 区办理。</span>
+        </div>
+        <div id="previewBox" style="margin-top:12px;"></div>
+    </section>
+
+    <!-- 2) 合同版本（财务） -->
+    <section th:if="${canManageContract}">
+        <h2>2. 合同版本管理（财务）· 发布新版本“运输费用按异常扣罚”</h2>
+        <details>
+            <summary>起草新版本（基础费率档 + 延误/超温/封签扣罚规则，JSON 提交；保存为草稿不生效）</summary>
+            <div style="margin-top:8px;">
+                <label class="muted">版本名称 <input id="cvName" value="运输费用按异常扣罚" style="width:300px;"></label>
+                <label class="muted">变更原因 <input id="cvReason" value="延误/超温/封签异常按等级扣罚" style="width:420px;"></label>
+                <textarea id="cvPayload" rows="14" style="width:100%;font-family:Consolas,monospace;font-size:12px;margin-top:6px;">{
+  "baseRates": [
+    {"boxType":"REFRIGERATED_BOX","kmFrom":0,"kmTo":200,"pricePerKm":6.50,"minCharge":300},
+    {"boxType":"REFRIGERATED_BOX","kmFrom":200,"kmTo":500,"pricePerKm":5.80,"minCharge":1000},
+    {"boxType":"REFRIGERATED_BOX","kmFrom":500,"kmTo":null,"pricePerKm":5.20,"minCharge":2500}
+  ],
+  "penaltyRules": [
+    {"exceptionType":"DELAY","grade":"L1","calcType":"PERCENT","percent":20,"capAmount":2000},
+    {"exceptionType":"DELAY","grade":"L2","calcType":"PERCENT","percent":10,"capAmount":1000},
+    {"exceptionType":"DELAY","grade":"L3","calcType":"FIXED","fixedAmount":200},
+    {"exceptionType":"TEMP_EXCURSION","grade":null,"calcType":"PERCENT","percent":30,"capAmount":5000},
+    {"exceptionType":"SEAL_BROKEN","grade":null,"calcType":"FIXED","fixedAmount":500}
+  ]
+}</textarea>
+                <div style="margin-top:6px;">
+                    <button onclick="draftContract()">起草新版本（DRAFT）</button>
+                </div>
+            </div>
+        </details>
+        <div id="contractBox" style="margin-top:10px;"></div>
+    </section>
+
+    <!-- 3) 结算单台账 -->
+    <section>
+        <h2>3. 预结算单台账（争议 → 待复核 → 财务复核 → 审核冻结）</h2>
+        <button onclick="loadSettlements()">刷新结算单列表</button>
+        <button class="ghost" th:if="${canReplay}" onclick="document.getElementById('replaySection').scrollIntoView()">前往旧数据回放 ↓</button>
+        <div id="settlementList" style="margin-top:10px;"></div>
+        <div id="settlementDetail" style="margin-top:14px;"></div>
+    </section>
+
+    <!-- 4) 旧数据回放 -->
+    <section id="replaySection" th:if="${canReplay}">
+        <h2>4. 冷链药品运输旧数据回放（基线版本 → 新版本，差异逐项解释）</h2>
+        <div class="grid">
+            <label>目标合同版本（空=当前生效）
+                <select id="rpTarget">
+                    <option value="">当前生效版本</option>
+                    <option th:each="c : ${contracts}" th:value="${c.id}"
+                            th:text="'V' + ${c.versionNo} + ' ' + ${c.versionName}"></option>
+                </select>
+            </label>
+            <label>基线合同版本（空=目标上一版）
+                <select id="rpBaseline">
+                    <option value="">自动取上一版</option>
+                    <option th:each="c : ${contracts}" th:value="${c.id}"
+                            th:text="'V' + ${c.versionNo} + ' ' + ${c.versionName}"></option>
+                </select>
+            </label>
+            <label>旧数据缺箱型时统一补录
+                <select id="rpBox">
+                    <option value="">不补录（缺维度批次跳过）</option>
+                    <option value="REFRIGERATED_BOX">冷藏箱</option>
+                    <option value="INSULATED_BOX">保温箱</option>
+                    <option value="DRY_ICE_BOX">干冰箱</option>
+                    <option value="FULL_TRUCK">整车冷藏车厢</option>
+                    <option value="LTL">零担拼舱</option>
+                </select>
+            </label>
+            <label>旧数据缺里程时统一补录（公里）<input id="rpMileage" type="number" step="0.01" min="0"></label>
+        </div>
+        <div style="margin-top:8px;">
+            <label class="muted">指定批次ID（逗号分隔，留空=全部已签收批次）<input id="rpBatchIds" style="width:300px;"></label>
+        </div>
+        <div style="margin-top:8px;">
+            <button class="warn" onclick="doReplay()">回放并生成差异报告</button>
+            <button class="ghost" onclick="loadReplays()">查看历史回放报告</button>
+        </div>
+        <div id="replayBox" style="margin-top:10px;"></div>
+    </section>
+</main>
+
+<script th:inline="javascript">
+    const API = '/api/cold-chain/freight';
+    const FINANCE = /*[[${financeScope}]]*/ false;
+    const CAN_GENERATE = /*[[${canGenerate}]]*/ false;
+    const CAN_DISPUTE = /*[[${canDispute}]]*/ false;
+    const CAN_REVIEW = /*[[${canReview}]]*/ false;
+    const CAN_AUDIT = /*[[${canAudit}]]*/ false;
+    const CAN_MANAGE = /*[[${canManageContract}]]*/ false;
+
+    function msg(text, ok) {
+        const el = document.getElementById('globalMsg');
+        el.textContent = text;
+        el.className = 'msg ' + (ok ? 'ok' : 'err');
+    }
+    function api(path, method, body) {
+        return fetch(API + path, {
+            method: method || 'GET',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: body ? JSON.stringify(body) : undefined
+        }).then(function (r) {
+            return r.json().then(function (j) {
+                if (!r.ok || (j && j.success === false)) {
+                    throw new Error(j.message || ('HTTP ' + r.status));
+                }
+                return j.data !== undefined ? j.data : j;
+            });
+        });
+    }
+    const fmt = v => v == null ? (FINANCE ? '-' : '****');
+    const esc = s => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])));
+    const money = v => v == null ? '-' : Number(v).toFixed(2);
+    const statusTag = s => '<span class="tag ' + ({PENDING:'pending',DISPUTED:'disputed',AUDITED:'audited'}[s]||'pending') + '">' +
+        ({PENDING:'待审核',DISPUTED:'争议待复核',AUDITED:'已审核冻结'}[s]||s) + '</span>';
+
+    function formBody(formId) {
+        const out = {};
+        new FormData(document.getElementById(formId)).forEach((v, k) => { if (v !== '') out[k] = isNaN(v) || k === 'boxType' ? v : Number(v); });
+        return out;
+    }
+
+    function renderItems(items) {
+        let html = '<table><tr><th>项次</th><th>类型</th><th>费用项</th><th>计价方式</th>'
+            + (FINANCE ? '<th>单价/比率</th><th>数量/基数</th>' : '<th class="masked">单价（财务可见）</th>')
+            + '<th>金额(元)</th><th>计入</th><th>费用依据</th><th>争议</th></tr>';
+        items.forEach(it => {
+            const kindTag = it.itemKind === 'BASE'
+                ? '<span class="tag base">基础运费</span>'
+                : '<span class="tag pen">异常扣罚</span>';
+            const calcName = {RATE:'里程费率', FIXED:'定额', PERCENT:'按比例'}[it.calcType] || it.calcType;
+            html += '<tr><td>' + it.itemSeq + '</td><td>' + kindTag + '</td><td>' + esc(it.title) + '</td><td>' + calcName + '</td>';
+            if (FINANCE) {
+                html += '<td>' + money(it.unitPrice) + '</td><td>' + money(it.quantity) + '</td>';
+            } else {
+                html += '<td class="masked">****</td>';
+            }
+            html += '<td><b>' + money(it.amount) + '</b></td><td>' + (it.included ? '计入' : '<span class="muted">不计入</span>') + '</td>';
+            html += '<td><div class="basis">' + esc(it.basisBusiness) + '</div>'
+                + (FINANCE && it.basisPricing ? '<div class="basis pricing">计价依据：' + esc(it.basisPricing) + '</div>'
+                    : (!FINANCE ? '<div class="muted">计价依据（费率档/算式）仅财务可见</div>' : ''))
+                + (FINANCE && it.ruleSnapshot ? '<details><summary>规则快照</summary><pre class="basis">' + esc(it.ruleSnapshot) + '</pre></details>' : '')
+                + '</td>';
+            html += '<td>' + disputeCell(it) + '</td></tr>';
+        });
+        html += '</table>';
+        return html;
+    }
+
+    function disputeCell(it) {
+        if (!it.exceptionId && it.itemKind !== 'PENALTY') return '<span class="muted">—</span>';
+        const map = {NONE:'无', PENDING:'待复核', INCLUDED:'复核计入', EXCLUDED:'复核不计入'};
+        let html = map[it.disputeStatus] || it.disputeStatus;
+        if (it.disputeReason) html += '<div class="muted">争议：' + esc(it.disputeReason) + '</div>';
+        if (FINANCE && it.reviewNote) html += '<div class="muted">复核意见：' + esc(it.reviewNote) + '</div>';
+        return html;
+    }
+
+    function renderSettlementView(data, forPreview) {
+        const s = data.settlement || data;
+        const items = data.items || [];
+        let html = '<div class="totals">结算单：<b>' + esc(s.settlementNo || '（预览未落库）') + '</b> 批次 '
+            + esc(s.batchNo) + ' 合同 V' + s.contractVersionNo + ' ' + statusTag(s.status || 'PENDING')
+            + ' &nbsp; 箱型 ' + esc(s.boxTypeNameSnap || data.boxTypeName) + '，里程 '
+            + money(s.mileageKmSnap || data.mileageKm) + 'km（' + ((s.mileageSource || data.mileageSource) === 'ROUTE' ? '路线里程' : '人工补录') + '）';
+        if (s.auditTime) html += ' &nbsp; 审核时间 ' + s.auditTime;
+        html += '</div>';
+        html += '<div class="totals" style="margin:8px 0;">基础运费 <b>' + money(s.baseAmount !== undefined ? s.baseAmount : data.baseAmount)
+            + '</b> 元 ｜ 计入扣罚 <b>' + money(s.penaltyAmount !== undefined ? s.penaltyAmount : data.penaltyAmount)
+            + '</b> 元 ｜ 应付 <b style="font-size:16px;">' + money(s.payableAmount !== undefined ? s.payableAmount : data.payableAmount) + '</b> 元</div>';
+        if (!FINANCE && !forPreview) html += '<div class="muted">运营视图：单价、费率档、规则快照与审核备注已按岗位收窄。</div>';
+        html += renderItems(items);
+        if (!forPreview && s.id) {
+            html += '<div style="margin-top:10px;">';
+            if (CAN_AUDIT && s.status !== 'AUDITED' && (s.disputePendingCount || 0) === 0) {
+                html += '<button class="ok" onclick="doAudit(' + s.id + ')">财务审核通过并冻结</button>';
+            }
+            if (s.status === 'AUDITED') html += '<span class="tag audited">已审核冻结：新合同版本/回放均不重算本单</span>';
+            html += '</div>';
+            items.forEach(it => {
+                if (it.itemKind === 'PENALTY' && s.status !== 'AUDITED') {
+                    if (CAN_DISPUTE && it.disputeStatus !== 'PENDING') {
+                        html += '<div style="margin-top:6px;"><button class="warn" onclick="doDispute(' + s.id + ',' + it.id + ')">对「'
+                            + esc(it.title) + '」提争议</button></div>';
+                    }
+                    if (CAN_REVIEW && it.disputeStatus === 'PENDING') {
+                        html += '<div style="margin-top:6px;"><button class="ok" onclick="doReview(' + s.id + ',' + it.id + ',true)">复核：计入</button>'
+                            + '<button class="warn" onclick="doReview(' + s.id + ',' + it.id + ',false)">复核：不计入</button></div>';
+                    }
+                }
+            });
+        }
+        return html;
+    }
+
+    function doPreview() {
+        api('/settlements/preview', 'POST', formBody('previewForm'))
+            .then(d => { document.getElementById('previewBox').innerHTML = renderSettlementView(d, true); msg('预览完成（未落库）', true); })
+            .catch(e => msg('预览失败：' + e.message, false));
+    }
+    function doGenerate() {
+        if (!confirm('生成后将固化合同规则与逐项费用快照，确认生成预结算单？')) return;
+        api('/settlements/generate', 'POST', formBody('previewForm'))
+            .then(d => { document.getElementById('settlementDetail').innerHTML = renderSettlementView(d, false); msg('预结算单已生成', true); loadSettlements(); })
+            .catch(e => msg('生成失败：' + e.message, false));
+    }
+    function doDispute(sid, iid) {
+        const reason = prompt('争议原因（争议项将进入待复核）：');
+        if (!reason) return;
+        api('/settlements/disputes', 'POST', {settlementId: sid, itemId: iid, reason})
+            .then(d => { document.getElementById('settlementDetail').innerHTML = renderSettlementView(d, false); msg('已提出争议，进入待复核', true); loadSettlements(); })
+            .catch(e => msg('争议失败：' + e.message, false));
+    }
+    function doReview(sid, iid, included) {
+        const note = prompt(included ? '复核意见（扣罚维持计入）：' : '复核意见（扣罚不计入，重算应付）：');
+        if (!note) return;
+        api('/settlements/reviews', 'POST', {settlementId: sid, itemId: iid, included, note})
+            .then(d => { document.getElementById('settlementDetail').innerHTML = renderSettlementView(d, false); msg('复核完成，应付已重算', true); loadSettlements(); })
+            .catch(e => msg('复核失败：' + e.message, false));
+    }
+    function doAudit(sid) {
+        const remark = prompt('审核备注（可空）：') || '';
+        api('/settlements/audits', 'POST', {settlementId: sid, auditRemark: remark})
+            .then(d => { document.getElementById('settlementDetail').innerHTML = renderSettlementView(d, false); msg('审核通过并冻结，新规则不得重算', true); loadSettlements(); })
+            .catch(e => msg('审核失败：' + e.message, false));
+    }
+
+    function loadSettlements() {
+        api('/settlements').then(list => {
+            let html = '<table><tr><th>结算单号</th><th>批次</th><th>承运商</th><th>合同版本</th><th>基础运费</th><th>扣罚</th><th>应付</th><th>状态</th><th>待复核</th><th>生成时间</th><th></th></tr>';
+            list.forEach(s => {
+                html += '<tr><td>' + esc(s.settlementNo) + '</td><td>' + esc(s.batchNo) + '</td><td>' + esc(s.carrierNameSnap || '-')
+                    + '</td><td>V' + s.contractVersionNo + '</td><td>' + money(s.baseAmount) + '</td><td>' + money(s.penaltyAmount)
+                    + '</td><td><b>' + money(s.payableAmount) + '</b></td><td>' + statusTag(s.status) + '</td><td>' + (s.disputePendingCount || 0)
+                    + '</td><td>' + (s.generateTime || '') + '</td><td><button onclick="loadDetail(' + s.id + ')">查看依据</button></td></tr>';
+            });
+            html += '</table>';
+            document.getElementById('settlementList').innerHTML = list.length ? html : '<span class="muted">暂无结算单</span>';
+        }).catch(e => msg('加载结算单失败：' + e.message, false));
+    }
+    function loadDetail(id) {
+        api('/settlements/' + id).then(d => {
+            document.getElementById('settlementDetail').innerHTML = renderSettlementView(d, false);
+        }).catch(e => msg('加载详情失败：' + e.message, false));
+    }
+
+    // —— 合同版本 ——
+    function loadContracts() {
+        api('/contracts').then(list => {
+            let html = '<table><tr><th>版本</th><th>名称</th><th>状态</th><th>生效时间</th><th>发布人</th><th>操作</th></tr>';
+            list.forEach(c => {
+                html += '<tr><td>V' + c.versionNo + '</td><td>' + esc(c.versionName) + '</td><td>' + c.status
+                    + '</td><td>' + (c.publishTime || '-') + '</td><td>' + esc(c.publishByName || '-') + '</td><td>'
+                    + (c.status === 'DRAFT' && CAN_MANAGE ? '<button class="ok" onclick="publishContract(' + c.id + ')">发布生效</button>'
+                        : '<button class="ghost" onclick="loadRules(' + c.id + ')">查看规则</button>') + '</td></tr>';
+            });
+            html += '</table><div id="rulesBox"></div>';
+            document.getElementById('contractBox').innerHTML = html;
+        });
+    }
+    function loadRules(id) {
+        api('/contracts/' + id + '/rules').then(d => {
+            let html = '<b>基础费率档</b><table><tr><th>箱型</th><th>区间(km)</th><th>元/公里</th><th>最低收费</th></tr>';
+            d.baseRates.forEach(r => html += '<tr><td>' + esc(r.boxTypeName) + '</td><td>' + r.kmFrom + '~' + (r.kmTo || '∞')
+                + '</td><td>' + money(r.pricePerKm) + '</td><td>' + money(r.minCharge) + '</td></tr>');
+            html += '</table><b style="display:inline-block;margin-top:8px;">异常扣罚规则</b><table><tr><th>异常</th><th>等级</th><th>计价</th><th>定额</th><th>比例</th><th>封顶</th></tr>';
+            d.penaltyRules.forEach(p => html += '<tr><td>' + esc(p.exceptionTypeName) + '</td><td>' + (p.grade || '通配')
+                + '</td><td>' + p.calcType + '</td><td>' + money(p.fixedAmount) + '</td><td>' + (p.percent || '-')
+                + '</td><td>' + money(p.capAmount) + '</td></tr>');
+            html += '</table>';
+            document.getElementById('rulesBox').innerHTML = html;
+        });
+    }
+    function draftContract() {
+        let payload;
+        try { payload = JSON.parse(document.getElementById('cvPayload').value); }
+        catch (e) { msg('规则 JSON 解析失败：' + e.message, false); return; }
+        payload.versionName = document.getElementById('cvName').value;
+        payload.changeReason = document.getElementById('cvReason').value;
+        api('/contracts/draft', 'POST', payload)
+            .then(() => { msg('新版本已起草（DRAFT，未生效）', true); loadContracts(); })
+            .catch(e => msg('起草失败：' + e.message, false));
+    }
+    function publishContract(id) {
+        if (!confirm('发布后热替换当前生效版本，只影响此后生成的预结算与回放（已审核结算冻结不重算）。确认发布？')) return;
+        api('/contracts/' + id + '/publish', 'POST')
+            .then(() => { msg('新版本已发布生效', true); loadContracts(); })
+            .catch(e => msg('发布失败：' + e.message, false));
+    }
+
+    // —— 回放 ——
+    function doReplay() {
+        const body = {};
+        if (document.getElementById('rpTarget').value) body.targetContractId = Number(document.getElementById('rpTarget').value);
+        if (document.getElementById('rpBaseline').value) body.baselineContractId = Number(document.getElementById('rpBaseline').value);
+        if (document.getElementById('rpBox').value) body.defaultBoxType = document.getElementById('rpBox').value;
+        if (document.getElementById('rpMileage').value) body.defaultMileageKm = Number(document.getElementById('rpMileage').value);
+        const ids = document.getElementById('rpBatchIds').value.trim();
+        if (ids) body.batchIds = ids.split(',').map(x => Number(x.trim())).filter(x => x);
+        api('/replays', 'POST', body).then(d => {
+            renderReplay(d.report, d.items, d.skipped || []);
+            msg('回放完成：' + d.report.resultDetail, true);
+        }).catch(e => msg('回放失败：' + e.message, false));
+    }
+    function loadReplays() {
+        api('/replays').then(list => {
+            let html = '<table><tr><th>报告号</th><th>基线</th><th>目标</th><th>批次</th><th>变化</th><th>冻结</th><th>时间</th><th></th></tr>';
+            list.forEach(r => html += '<tr><td>' + esc(r.replayNo) + '</td><td>V' + r.baselineVersionNo + '</td><td>V' + r.targetVersionNo
+                + '</td><td>' + r.batchCount + '</td><td>' + r.changedCount + '</td><td>' + r.frozenCount + '</td><td>' + r.replayTime
+                + '</td><td><button onclick="loadReplay(' + r.id + ')">查看差异</button></td></tr>');
+            html += '</table>';
+            document.getElementById('replayBox').innerHTML = html;
+        });
+    }
+    function loadReplay(id) {
+        api('/replays/' + id).then(d => renderReplay(d.report, d.items, []));
+    }
+    function renderReplay(report, items, skipped) {
+        let html = '<div class="totals">报告 ' + esc(report.replayNo) + '：V' + report.baselineVersionNo + ' → V'
+            + report.targetVersionNo + '；' + esc(report.resultDetail) + '</div>';
+        if (skipped.length) html += '<div class="msg err">跳过批次：' + esc(skipped.join('；')) + '</div>';
+        html += '<table><tr><th>批次</th><th>基线基础</th><th>基线扣罚</th><th>基线应付</th><th>目标基础</th><th>目标扣罚</th><th>目标应付</th><th>净差异</th><th>差异解释</th></tr>';
+        items.forEach(r => {
+            const cls = r.diffAmount > 0 ? 'diffpos' : (r.diffAmount < 0 ? 'diffneg' : '');
+            let lines = [];
+            try { lines = JSON.parse(r.diffDetail || '[]'); } catch (e) {}
+            html += '<tr><td>' + esc(r.batchNo) + (r.frozen ? ' <span class="tag audited">已审核冻结</span>' : '')
+                + '</td><td>' + money(r.baselineBaseAmount) + '</td><td>' + money(r.baselinePenaltyAmount) + '</td><td>' + money(r.baselinePayable)
+                + '</td><td>' + money(r.targetBaseAmount) + '</td><td>' + money(r.targetPenaltyAmount) + '</td><td>' + money(r.targetPayable)
+                + '</td><td class="' + cls + '">' + money(r.diffAmount) + '</td><td><div class="basis">'
+                + lines.map(l => '• ' + esc(l)).join('<br>') + '</div></td></tr>';
+        });
+        html += '</table>';
+        document.getElementById('replayBox').innerHTML = html;
+    }
+
+    loadSettlements();
+    if (CAN_MANAGE) loadContracts();
+</script>
+</body>
+</html>
